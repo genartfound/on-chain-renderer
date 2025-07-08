@@ -3,131 +3,432 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loading...</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+    <title>ArtBlocks Full Screen Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        .loading h2 {
+            margin-bottom: 1rem;
+            font-weight: 300;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff6b6b;
+            text-align: center;
+            z-index: 1000;
+            max-width: 80%;
+        }
+        
+        .error h2 {
+            margin-bottom: 1rem;
+            color: #ff6b6b;
+        }
+        
+        .error p {
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+        
+        .retry-btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        .retry-btn:hover {
+            background: #ff5252;
+        }
+        
+        .form-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1a1a1a;
+            padding: 2rem;
+            border-radius: 10px;
+            color: white;
+            min-width: 400px;
+            z-index: 1000;
+        }
+        
+        .form-container h2 {
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-weight: 300;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 14px;
+            color: #ccc;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #2a2a2a;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        
+        .load-btn {
+            width: 100%;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        .load-btn:hover {
+            background: #45a049;
+        }
+        
+        .load-btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .examples {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #444;
+        }
+        
+        .examples h3 {
+            font-size: 14px;
+            margin-bottom: 0.5rem;
+            color: #ccc;
+        }
+        
+        .example-link {
+            display: block;
+            color: #4CAF50;
+            text-decoration: none;
+            font-size: 12px;
+            margin-bottom: 0.25rem;
+            cursor: pointer;
+        }
+        
+        .example-link:hover {
+            text-decoration: underline;
+        }
+        
+        #artworkFrame {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            display: none;
+        }
+        
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+        
+        .controls:hover {
+            opacity: 1;
+        }
+        
+        .control-btn {
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            margin-left: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .control-btn:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+    </style>
 </head>
-<body style="margin:0;overflow:hidden;background:#000">
+<body>
+    <div id="loading" class="loading">
+        <h2>Loading ArtBlocks Artwork</h2>
+        <div class="spinner"></div>
+    </div>
+    
+    <div id="error" class="error" style="display: none;">
+        <h2>Error Loading Artwork</h2>
+        <p id="errorMessage"></p>
+        <button class="retry-btn" onclick="location.reload()">Retry</button>
+    </div>
+    
+    <div id="form" class="form-container" style="display: none;">
+        <h2>ArtBlocks Viewer</h2>
+        <div class="form-group">
+            <label for="contractAddress">Contract Address:</label>
+            <input type="text" id="contractAddress" placeholder="0x..." />
+        </div>
+        <div class="form-group">
+            <label for="tokenId">Token ID:</label>
+            <input type="number" id="tokenId" placeholder="123" />
+        </div>
+        <button class="load-btn" onclick="loadArtwork()">Load Artwork</button>
+        
+        <div class="examples">
+            <h3>Examples:</h3>
+            <a class="example-link" onclick="loadExample('0xa7d8d9ef8d8ce3a2f2ad8b4d1b6e3a5b8c6b7a8f', '1')">Chromie Squiggle #1</a>
+            <a class="example-link" onclick="loadExample('0x059edd72cd353df5106d2b9cc5ab83a52287ac3a', '23000000')">Memories of Qilin #0</a>
+            <a class="example-link" onclick="loadExample('0xa7d8d9ef8d8ce3a2f2ad8b4d1b6e3a5b8c6b7a8f', '71')">Chromie Squiggle #71</a>
+        </div>
+    </div>
+    
+    <iframe id="artworkFrame"></iframe>
+    
+    <div id="controls" class="controls" style="display: none;">
+        <button class="control-btn" onclick="showForm()">New Artwork</button>
+        <button class="control-btn" onclick="location.reload()">Refresh</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/viem/2.21.4/index.umd.js"></script>
     <script>
-        (async () => {
-            console.log('=== Art Blocks Renderer Starting ===');
+        // ArtBlocks On-Chain Generator contract address
+        const GENERATOR_CONTRACT = '0x08e671e82ee1636ce6dcb03a51f8c9ac11d5d2e7';
+        
+        // Contract ABI for the on-chain generator
+        const GENERATOR_ABI = [
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "_coreContract", "type": "address"},
+                    {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
+                ],
+                "name": "tokenURI",
+                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+        
+        let currentContract = '';
+        let currentTokenId = '';
+        
+        // Initialize the application
+        async function init() {
+            // Parse URL parameters
+            const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
             
-            // Generator contract address
-            const GENERATOR = '0x15F84e0c419e60769aCc666fF952Be84Eeb7b76E9';
-            
-            // More explicit ABI definition for ethers v6
-            const ABI = [
-                {
-                    "inputs": [
-                        {"internalType": "address", "name": "_contract", "type": "address"},
-                        {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
-                    ],
-                    "name": "tokenToArtBlocksTokenURI",
-                    "outputs": [
-                        {"internalType": "string", "name": "", "type": "string"}
-                    ],
-                    "stateMutability": "view",
-                    "type": "function"
+            // Check if we have contract address and token ID in URL
+            if (pathParts.length >= 2) {
+                const contractAddress = pathParts[pathParts.length - 2];
+                const tokenId = pathParts[pathParts.length - 1];
+                
+                // Validate contract address format
+                if (contractAddress.startsWith('0x') && contractAddress.length === 42) {
+                    currentContract = contractAddress;
+                    currentTokenId = tokenId;
+                    await loadArtworkFromChain();
+                    return;
                 }
-            ];
+            }
             
-            const RPCS = [
-                'https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449',
-                'https://eth.public-rpc.com'
-            ];
-
-            const urlPath = location.pathname + location.hash;
-            console.log('URL path:', urlPath);
+            // If no valid URL params, show the form
+            showForm();
+        }
+        
+        function showForm() {
+            hideAll();
+            document.getElementById('form').style.display = 'block';
+        }
+        
+        function hideAll() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('form').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+        }
+        
+        function showError(message) {
+            hideAll();
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+        
+        function showLoading() {
+            hideAll();
+            document.getElementById('loading').style.display = 'block';
+        }
+        
+        function loadExample(contract, tokenId) {
+            document.getElementById('contractAddress').value = contract;
+            document.getElementById('tokenId').value = tokenId;
+            loadArtwork();
+        }
+        
+        async function loadArtwork() {
+            const contractInput = document.getElementById('contractAddress');
+            const tokenIdInput = document.getElementById('tokenId');
             
-            const match = urlPath.match(/([0-9a-fA-Fx]{42})\/(\d+)/);
+            currentContract = contractInput.value.trim();
+            currentTokenId = tokenIdInput.value.trim();
             
-            if (!match) {
-                console.error('No valid contract/token in URL');
-                document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid url format</div>';
+            // Basic validation
+            if (!currentContract || !currentTokenId) {
+                alert('Please enter both contract address and token ID');
                 return;
             }
-
-            const [_, contractAddress, tokenId] = match;
-            console.log('Contract Address (raw):', contractAddress);
-            console.log('Token ID:', tokenId);
             
-            // Ensure proper formatting
-            let checksummedAddress;
+            if (!currentContract.startsWith('0x') || currentContract.length !== 42) {
+                alert('Please enter a valid contract address (0x...)');
+                return;
+            }
+            
+            if (isNaN(currentTokenId) || currentTokenId < 0) {
+                alert('Please enter a valid token ID');
+                return;
+            }
+            
+            // Update URL without reloading
+            const newUrl = `${window.location.origin}${window.location.pathname}${currentContract}/${currentTokenId}`;
+            window.history.pushState({}, '', newUrl);
+            
+            await loadArtworkFromChain();
+        }
+        
+        async function loadArtworkFromChain() {
+            showLoading();
+            
             try {
-                checksummedAddress = ethers.getAddress(contractAddress);
-                console.log('Contract Address (checksummed):', checksummedAddress);
-            } catch (e) {
-                console.error('Failed to checksum address:', e);
-                document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid contract address</div>';
-                return;
-            }
-
-            for (const rpc of RPCS) {
-                console.log(`\n--- Trying RPC: ${rpc} ---`);
-                try {
-                    console.log('Creating provider...');
-                    const provider = new ethers.JsonRpcProvider(rpc);
-                    
-                    // Let's verify the provider is working
-                    const blockNumber = await provider.getBlockNumber();
-                    console.log('Provider connected! Current block:', blockNumber);
-                    
-                    console.log('Creating contract instance...');
-                    const generator = new ethers.Contract(GENERATOR, ABI, provider);
-                    
-                    console.log('Calling tokenToArtBlocksTokenURI...');
-                    console.log('Parameters:', checksummedAddress, tokenId);
-                    
-                    // Call the function
-                    const dataURI = await generator.tokenToArtBlocksTokenURI(checksummedAddress, tokenId);
-                    
-                    console.log('Response received!');
-                    console.log('Data URI type:', typeof dataURI);
-                    console.log('Data URI length:', dataURI ? dataURI.length : 0);
-                    console.log('First 200 chars:', dataURI ? dataURI.substring(0, 200) : 'null/undefined');
-                    
-                    if (!dataURI) {
-                        console.warn('Data URI is null or undefined');
-                        continue;
-                    }
-                    
-                    if (dataURI.startsWith('data:text/html')) {
-                        console.log('Valid HTML data URI found!');
-                        let htmlContent;
-                        
-                        if (dataURI.includes('base64,')) {
-                            console.log('Decoding base64 content...');
-                            const base64Part = dataURI.split('base64,')[1];
-                            htmlContent = atob(base64Part);
-                        } else {
-                            console.log('Decoding URL-encoded content...');
-                            htmlContent = decodeURIComponent(dataURI.replace('data:text/html,', ''));
-                        }
-                        
-                        console.log('HTML content length:', htmlContent.length);
-                        console.log('Rendering artwork...');
-                        
-                        document.open();
-                        document.write(htmlContent);
-                        document.close();
-                        return;
-                    } else {
-                        console.warn('Data URI does not start with "data:text/html"');
-                        console.warn('Actual start:', dataURI.substring(0, 50));
-                    }
-                } catch (error) {
-                    console.error('Error with RPC:', rpc);
-                    console.error('Error details:', {
-                        message: error.message,
-                        code: error.code,
-                        reason: error.reason,
-                        data: error.data
-                    });
+                // Create a public client to interact with Ethereum mainnet
+                const client = viem.createPublicClient({
+                    chain: viem.mainnet,
+                    transport: viem.http()
+                });
+                
+                console.log(`Loading artwork for contract: ${currentContract}, token: ${currentTokenId}`);
+                
+                // Call the on-chain generator to get the artwork HTML
+                const result = await client.readContract({
+                    address: GENERATOR_CONTRACT,
+                    abi: GENERATOR_ABI,
+                    functionName: 'tokenURI',
+                    args: [currentContract, BigInt(currentTokenId)]
+                });
+                
+                console.log('Received token URI:', result);
+                
+                // The result should be a data URI containing the HTML
+                if (!result || !result.startsWith('data:text/html;base64,')) {
+                    throw new Error('Invalid response from on-chain generator. This might not be a supported ArtBlocks token.');
                 }
+                
+                // Display the artwork in the iframe
+                const iframe = document.getElementById('artworkFrame');
+                iframe.src = result;
+                
+                // Show the iframe and controls
+                hideAll();
+                iframe.style.display = 'block';
+                document.getElementById('controls').style.display = 'block';
+                
+                console.log('Artwork loaded successfully');
+                
+            } catch (error) {
+                console.error('Error loading artwork:', error);
+                
+                let errorMessage = 'Failed to load artwork from the blockchain. ';
+                
+                if (error.message.includes('Invalid response')) {
+                    errorMessage += 'This token may not be supported by the on-chain generator, or the contract address/token ID may be incorrect.';
+                } else if (error.message.includes('network') || error.message.includes('fetch')) {
+                    errorMessage += 'Please check your internet connection and try again.';
+                } else if (error.message.includes('revert') || error.message.includes('execution reverted')) {
+                    errorMessage += 'The blockchain call failed. Please verify the contract address and token ID are correct.';
+                } else {
+                    errorMessage += `Error: ${error.message}`;
+                }
+                
+                showError(errorMessage);
             }
-            
-            console.error('All RPC attempts failed');
-            document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">unable to load artwork<br><br><a href="javascript:location.reload()" style="color:#999">retry</a></div>';
-        })();
+        }
+        
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            // Press 'R' to reload
+            if (event.key === 'r' || event.key === 'R') {
+                location.reload();
+            }
+            // Press 'N' for new artwork
+            if (event.key === 'n' || event.key === 'N') {
+                showForm();
+            }
+            // Press 'Escape' to show form
+            if (event.key === 'Escape') {
+                showForm();
+            }
+        });
+        
+        // Initialize when the page loads
+        window.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
