@@ -9,6 +9,8 @@
 <body style="margin:0;overflow:hidden;background:#000">
     <script>
         (async () => {
+            console.log('=== Art Blocks Renderer Starting ===');
+            
             const GENERATOR = '0x15F84e0c419e60769aCc666fF952Be84Eeb7b76E9';
             const ABI = ["function tokenToArtBlocksTokenURI(address,uint256) view returns (string)"];
             
@@ -18,44 +20,82 @@
             ];
 
             const urlPath = location.pathname + location.hash;
+            console.log('URL path:', urlPath);
+            
             const match = urlPath.match(/([0-9a-fA-Fx]{42})\/(\d+)/);
             
             if (!match) {
+                console.error('No valid contract/token in URL');
                 document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid url format</div>';
                 return;
             }
 
             const [_, contractAddress, tokenId] = match;
+            console.log('Contract Address (raw):', contractAddress);
+            console.log('Token ID:', tokenId);
             
             // Fix the checksum for the contract address
             const checksummedAddress = ethers.getAddress(contractAddress);
+            console.log('Contract Address (checksummed):', checksummedAddress);
 
             for (const rpc of RPCS) {
+                console.log(`\n--- Trying RPC: ${rpc} ---`);
                 try {
                     const provider = new ethers.JsonRpcProvider(rpc);
                     const generator = new ethers.Contract(GENERATOR, ABI, provider);
                     
-                    // Use the checksummed address in the function call
+                    console.log('Calling tokenToArtBlocksTokenURI...');
+                    console.log('Parameters:', checksummedAddress, tokenId);
+                    
                     const dataURI = await generator.tokenToArtBlocksTokenURI(checksummedAddress, tokenId);
                     
-                    if (dataURI?.startsWith('data:text/html')) {
+                    console.log('Response received!');
+                    console.log('Data URI type:', typeof dataURI);
+                    console.log('Data URI length:', dataURI ? dataURI.length : 0);
+                    console.log('First 200 chars:', dataURI ? dataURI.substring(0, 200) : 'null/undefined');
+                    
+                    if (!dataURI) {
+                        console.warn('Data URI is null or undefined');
+                        continue;
+                    }
+                    
+                    if (dataURI.startsWith('data:text/html')) {
+                        console.log('Valid HTML data URI found!');
                         let htmlContent;
+                        
                         if (dataURI.includes('base64,')) {
-                            htmlContent = atob(dataURI.split('base64,')[1]);
+                            console.log('Decoding base64 content...');
+                            const base64Part = dataURI.split('base64,')[1];
+                            htmlContent = atob(base64Part);
                         } else {
+                            console.log('Decoding URL-encoded content...');
                             htmlContent = decodeURIComponent(dataURI.replace('data:text/html,', ''));
                         }
+                        
+                        console.log('HTML content length:', htmlContent.length);
+                        console.log('Rendering artwork...');
                         
                         document.open();
                         document.write(htmlContent);
                         document.close();
                         return;
+                    } else {
+                        console.warn('Data URI does not start with "data:text/html"');
+                        console.warn('Actual start:', dataURI.substring(0, 50));
                     }
                 } catch (error) {
-                    continue;
+                    console.error('Error with RPC:', rpc);
+                    console.error('Error message:', error.message);
+                    console.error('Full error:', error);
+                    
+                    // Log more details about the error
+                    if (error.reason) console.error('Error reason:', error.reason);
+                    if (error.code) console.error('Error code:', error.code);
+                    if (error.data) console.error('Error data:', error.data);
                 }
             }
             
+            console.error('All RPC attempts failed');
             document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">unable to load artwork<br><br><a href="javascript:location.reload()" style="color:#999">retry</a></div>';
         })();
     </script>
