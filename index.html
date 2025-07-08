@@ -11,8 +11,24 @@
         (async () => {
             console.log('=== Art Blocks Renderer Starting ===');
             
+            // Generator contract address
             const GENERATOR = '0x15F84e0c419e60769aCc666fF952Be84Eeb7b76E9';
-            const ABI = ["function tokenToArtBlocksTokenURI(address,uint256) view returns (string)"];
+            
+            // More explicit ABI definition for ethers v6
+            const ABI = [
+                {
+                    "inputs": [
+                        {"internalType": "address", "name": "_contract", "type": "address"},
+                        {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
+                    ],
+                    "name": "tokenToArtBlocksTokenURI",
+                    "outputs": [
+                        {"internalType": "string", "name": "", "type": "string"}
+                    ],
+                    "stateMutability": "view",
+                    "type": "function"
+                }
+            ];
             
             const RPCS = [
                 'https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449',
@@ -34,19 +50,34 @@
             console.log('Contract Address (raw):', contractAddress);
             console.log('Token ID:', tokenId);
             
-            // Fix the checksum for the contract address
-            const checksummedAddress = ethers.getAddress(contractAddress);
-            console.log('Contract Address (checksummed):', checksummedAddress);
+            // Ensure proper formatting
+            let checksummedAddress;
+            try {
+                checksummedAddress = ethers.getAddress(contractAddress);
+                console.log('Contract Address (checksummed):', checksummedAddress);
+            } catch (e) {
+                console.error('Failed to checksum address:', e);
+                document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid contract address</div>';
+                return;
+            }
 
             for (const rpc of RPCS) {
                 console.log(`\n--- Trying RPC: ${rpc} ---`);
                 try {
+                    console.log('Creating provider...');
                     const provider = new ethers.JsonRpcProvider(rpc);
+                    
+                    // Let's verify the provider is working
+                    const blockNumber = await provider.getBlockNumber();
+                    console.log('Provider connected! Current block:', blockNumber);
+                    
+                    console.log('Creating contract instance...');
                     const generator = new ethers.Contract(GENERATOR, ABI, provider);
                     
                     console.log('Calling tokenToArtBlocksTokenURI...');
                     console.log('Parameters:', checksummedAddress, tokenId);
                     
+                    // Call the function
                     const dataURI = await generator.tokenToArtBlocksTokenURI(checksummedAddress, tokenId);
                     
                     console.log('Response received!');
@@ -85,13 +116,12 @@
                     }
                 } catch (error) {
                     console.error('Error with RPC:', rpc);
-                    console.error('Error message:', error.message);
-                    console.error('Full error:', error);
-                    
-                    // Log more details about the error
-                    if (error.reason) console.error('Error reason:', error.reason);
-                    if (error.code) console.error('Error code:', error.code);
-                    if (error.data) console.error('Error data:', error.data);
+                    console.error('Error details:', {
+                        message: error.message,
+                        code: error.code,
+                        reason: error.reason,
+                        data: error.data
+                    });
                 }
             }
             
