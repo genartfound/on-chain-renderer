@@ -250,7 +250,7 @@
         <button class="control-btn" onclick="location.reload()">Refresh</button>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/viem/2.21.4/index.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
         // ArtBlocks On-Chain Generator contract address
         const GENERATOR_CONTRACT = '0x08e671e82ee1636ce6dcb03a51f8c9ac11d5d2e7';
@@ -358,21 +358,23 @@
             showLoading();
             
             try {
-                // Create a public client to interact with Ethereum mainnet
-                const client = viem.createPublicClient({
-                    chain: viem.mainnet,
-                    transport: viem.http()
-                });
+                // Create a provider to connect to Ethereum mainnet
+                // Replace 'YOUR_INFURA_PROJECT_ID' with your actual Infura project ID
+                // If you don't have an Infura key, you can use the public endpoint as a fallback
+                const INFURA_PROJECT_ID = 'YOUR_INFURA_PROJECT_ID'; // Replace with your actual key
+                const rpcUrl = INFURA_PROJECT_ID !== 'YOUR_INFURA_PROJECT_ID' 
+                    ? `https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}`
+                    : 'https://eth.llamarpc.com'; // Fallback to public endpoint
+                
+                const provider = new ethers.JsonRpcProvider(rpcUrl);
                 
                 console.log(`Loading artwork for contract: ${currentContract}, token: ${currentTokenId}`);
                 
+                // Create a contract instance
+                const contract = new ethers.Contract(GENERATOR_CONTRACT, GENERATOR_ABI, provider);
+                
                 // Call the on-chain generator to get the artwork HTML
-                const result = await client.readContract({
-                    address: GENERATOR_CONTRACT,
-                    abi: GENERATOR_ABI,
-                    functionName: 'tokenURI',
-                    args: [currentContract, BigInt(currentTokenId)]
-                });
+                const result = await contract.tokenURI(currentContract, currentTokenId);
                 
                 console.log('Received token URI:', result);
                 
