@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+</head>
+<body style="margin:0;overflow:hidden;background:#000">
+    <script>
+        (async () => {
+            const GENERATOR = '0x15f84E0C419e60769aFC666FF952bE84eB7B76e9';
+            const ABI = ["function tokenToArtBlocksTokenURI(address,uint256) view returns (string)"];
+            
+            const RPCS = [
+                'https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449',
+                'https://eth.public-rpc.com'
+            ];
+
+            const urlPath = location.pathname + location.hash;
+            const match = urlPath.match(/([0-9a-fA-Fx]{42})\/(\d+)/);
+            
+            if (!match) {
+                document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid url format</div>';
+                return;
+            }
+
+            const [_, contractAddress, tokenId] = match;
+
+            for (const rpc of RPCS) {
+                try {
+                    const provider = new ethers.JsonRpcProvider(rpc);
+                    const generator = new ethers.Contract(GENERATOR, ABI, provider);
+                    const dataURI = await generator.tokenToArtBlocksTokenURI(contractAddress, tokenId);
+                    
+                    if (dataURI?.startsWith('data:text/html')) {
+                        let htmlContent;
+                        if (dataURI.includes('base64,')) {
+                            htmlContent = atob(dataURI.split('base64,')[1]);
+                        } else {
+                            htmlContent = decodeURIComponent(dataURI.replace('data:text/html,', ''));
+                        }
+                        
+                        document.open();
+                        document.write(htmlContent);
+                        document.close();
+                        return;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">unable to load artwork<br><br><a href="javascript:location.reload()" style="color:#999">retry</a></div>';
+        })();
+    </script>
+</body>
+</html>
