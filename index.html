@@ -7,18 +7,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
 </head>
 <body style="margin:0;overflow:hidden;background:#000">
-    <div id="status" style="color:#999;font:14px monospace;padding:20px;">
-        Starting renderer...
-    </div>
     <script>
-        function updateStatus(message) {
-            document.getElementById('status').innerHTML += '<br>' + message;
-            console.log(message);
-        }
-
         (async () => {
-            updateStatus('Script started');
-            
             const GENERATOR = '0x15F84e0c419e60769aCc666fF952Be84Eeb7b76E9';
             const ABI = ["function tokenToArtBlocksTokenURI(address,uint256) view returns (string)"];
             
@@ -26,70 +16,47 @@
                 'https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449',
                 'https://eth.public-rpc.com'
             ];
-            
+
             const urlPath = location.pathname + location.hash;
-            updateStatus('URL path: ' + urlPath);
-            
             const match = urlPath.match(/([0-9a-fA-Fx]{42})\/(\d+)/);
             
             if (!match) {
-                updateStatus('ERROR: Invalid URL format - no contract/token found');
                 document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">invalid url format</div>';
                 return;
             }
-            
+
             const [_, contractAddress, tokenId] = match;
-            updateStatus('Contract Address: ' + contractAddress);
-            updateStatus('Token ID: ' + tokenId);
-            updateStatus('Generator Contract: ' + GENERATOR);
             
+            // Fix the checksum for the contract address
+            const checksummedAddress = ethers.getAddress(contractAddress);
+
             for (const rpc of RPCS) {
-                updateStatus('---');
-                updateStatus('Trying RPC: ' + rpc);
                 try {
-                    updateStatus('Creating provider...');
                     const provider = new ethers.JsonRpcProvider(rpc);
-                    
-                    updateStatus('Creating contract instance...');
                     const generator = new ethers.Contract(GENERATOR, ABI, provider);
                     
-                    updateStatus('Calling tokenToArtBlocksTokenURI...');
-                    const dataURI = await generator.tokenToArtBlocksTokenURI(contractAddress, tokenId);
-                    
-                    updateStatus('Response received!');
-                    updateStatus('Data URI starts with: ' + (dataURI ? dataURI.substring(0, 50) + '...' : 'null'));
-                    updateStatus('Full length: ' + (dataURI ? dataURI.length : 0) + ' characters');
+                    // Use the checksummed address in the function call
+                    const dataURI = await generator.tokenToArtBlocksTokenURI(checksummedAddress, tokenId);
                     
                     if (dataURI?.startsWith('data:text/html')) {
-                        updateStatus('SUCCESS: Valid HTML data URI found!');
                         let htmlContent;
                         if (dataURI.includes('base64,')) {
-                            updateStatus('Decoding base64...');
                             htmlContent = atob(dataURI.split('base64,')[1]);
                         } else {
-                            updateStatus('Decoding URL-encoded content...');
                             htmlContent = decodeURIComponent(dataURI.replace('data:text/html,', ''));
                         }
                         
-                        updateStatus('Rendering artwork...');
                         document.open();
                         document.write(htmlContent);
                         document.close();
                         return;
-                    } else {
-                        updateStatus('WARNING: Data URI does not start with "data:text/html"');
-                        updateStatus('Actual start: ' + (dataURI ? dataURI.substring(0, 20) : 'null'));
                     }
                 } catch (error) {
-                    updateStatus('ERROR with this RPC: ' + error.message);
-                    if (error.data) {
-                        updateStatus('Error data: ' + JSON.stringify(error.data));
-                    }
                     continue;
                 }
             }
             
-            updateStatus('All RPC attempts failed - see errors above');
+            document.body.innerHTML = '<div style="color:#666;font:12px monospace;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">unable to load artwork<br><br><a href="javascript:location.reload()" style="color:#999">retry</a></div>';
         })();
     </script>
 </body>
