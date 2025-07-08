@@ -252,17 +252,27 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
-        // ArtBlocks On-Chain Generator contract address
-        const GENERATOR_CONTRACT = '0x08e671e82ee1636ce6dcb03a51f8c9ac11d5d2e7';
+        // ArtBlocks On-Chain Generator contract address (corrected)
+        const GENERATOR_CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
         
-        // Contract ABI for the on-chain generator
+        // Contract ABI for the on-chain generator (updated with correct functions)
         const GENERATOR_ABI = [
             {
                 "inputs": [
                     {"internalType": "address", "name": "_coreContract", "type": "address"},
                     {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
                 ],
-                "name": "tokenURI",
+                "name": "getTokenHtml",
+                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "_coreContract", "type": "address"},
+                    {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
+                ],
+                "name": "getTokenHtmlBase64EncodedDataUri",
                 "outputs": [{"internalType": "string", "name": "", "type": "string"}],
                 "stateMutability": "view",
                 "type": "function"
@@ -358,13 +368,10 @@
             showLoading();
             
             try {
-                // Create a provider to connect to Ethereum mainnet
-                // Replace 'YOUR_INFURA_PROJECT_ID' with your actual Infura project ID
-                // If you don't have an Infura key, you can use the public endpoint as a fallback
-                const INFURA_PROJECT_ID = 'e29898f2b78f4810ae2d0ce4c2a4a449'; // Replace with your actual key
-                const rpcUrl = INFURA_PROJECT_ID !== 'YOUR_INFURA_PROJECT_ID' 
-                    ? `https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}`
-                    : 'https://eth.llamarpc.com'; // Fallback to public endpoint
+                // Create a provider to connect to Ethereum mainnet using your Infura key
+                // This provides professional-grade reliability and performance
+                const INFURA_PROJECT_ID = 'e29898f2b78f4810ae2d0ce4c2a4a449';
+                const rpcUrl = `https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}`;
                 
                 const provider = new ethers.JsonRpcProvider(rpcUrl);
                 
@@ -374,7 +381,8 @@
                 const contract = new ethers.Contract(GENERATOR_CONTRACT, GENERATOR_ABI, provider);
                 
                 // Call the on-chain generator to get the artwork HTML
-                const result = await contract.tokenURI(currentContract, currentTokenId);
+                // Using getTokenHtmlBase64EncodedDataUri to get a data URI we can directly use in iframe
+                const result = await contract.getTokenHtmlBase64EncodedDataUri(currentContract, currentTokenId);
                 
                 console.log('Received token URI:', result);
                 
