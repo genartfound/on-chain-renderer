@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ArtBlocks Full Screen Viewer</title>
+    <title>On-Chain Renderer</title>
     <style>
         * {
             margin: 0;
@@ -25,11 +25,6 @@
             color: #fff;
             text-align: center;
             z-index: 1000;
-        }
-        
-        .loading h2 {
-            margin-bottom: 1rem;
-            font-weight: 300;
         }
         
         .spinner {
@@ -56,6 +51,7 @@
             text-align: center;
             z-index: 1000;
             max-width: 80%;
+            padding: 2rem;
         }
         
         .error h2 {
@@ -68,205 +64,33 @@
             line-height: 1.5;
         }
         
-        .retry-btn {
-            background: #ff6b6b;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.3s;
-        }
-        
-        .retry-btn:hover {
-            background: #ff5252;
-        }
-        
-        .form-container {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: #1a1a1a;
-            padding: 2rem;
-            border-radius: 10px;
-            color: white;
-            min-width: 400px;
-            z-index: 1000;
-        }
-        
-        .form-container h2 {
-            margin-bottom: 1.5rem;
-            text-align: center;
-            font-weight: 300;
-        }
-        
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-size: 14px;
-            color: #ccc;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #444;
-            border-radius: 5px;
-            background: #2a2a2a;
-            color: white;
-            font-size: 14px;
-        }
-        
-        .form-group input:focus {
-            outline: none;
-            border-color: #4CAF50;
-        }
-        
-        .load-btn {
-            width: 100%;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background 0.3s;
-        }
-        
-        .load-btn:hover {
-            background: #45a049;
-        }
-        
-        .load-btn:disabled {
-            background: #666;
-            cursor: not-allowed;
-        }
-        
-        .examples {
-            margin-top: 1.5rem;
-            padding-top: 1.5rem;
-            border-top: 1px solid #444;
-        }
-        
-        .examples h3 {
-            font-size: 14px;
-            margin-bottom: 0.5rem;
-            color: #ccc;
-        }
-        
-        .example-link {
-            display: block;
-            color: #4CAF50;
-            text-decoration: none;
-            font-size: 12px;
-            margin-bottom: 0.25rem;
-            cursor: pointer;
-        }
-        
-        .example-link:hover {
-            text-decoration: underline;
-        }
-        
         #artworkFrame {
             width: 100vw;
             height: 100vh;
             border: none;
             display: none;
         }
-        
-        .controls {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1001;
-            opacity: 0.7;
-            transition: opacity 0.3s;
-        }
-        
-        .controls:hover {
-            opacity: 1;
-        }
-        
-        .control-btn {
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            margin-left: 5px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .control-btn:hover {
-            background: rgba(0, 0, 0, 0.9);
-        }
     </style>
 </head>
 <body>
     <div id="loading" class="loading">
-        <h2>Loading ArtBlocks Artwork</h2>
         <div class="spinner"></div>
     </div>
     
     <div id="error" class="error" style="display: none;">
-        <h2>Error Loading Artwork</h2>
+        <h2>Unable to Render Artwork</h2>
         <p id="errorMessage"></p>
-        <button class="retry-btn" onclick="location.reload()">Retry</button>
-    </div>
-    
-    <div id="form" class="form-container" style="display: none;">
-        <h2>ArtBlocks Viewer</h2>
-        <div class="form-group">
-            <label for="contractAddress">Contract Address:</label>
-            <input type="text" id="contractAddress" placeholder="0x..." />
-        </div>
-        <div class="form-group">
-            <label for="tokenId">Token ID:</label>
-            <input type="number" id="tokenId" placeholder="123" />
-        </div>
-        <button class="load-btn" onclick="loadArtwork()">Load Artwork</button>
-        
-        <div class="examples">
-            <h3>Examples:</h3>
-            <a class="example-link" onclick="loadExample('0xa7d8d9ef8d8ce3a2f2ad8b4d1b6e3a5b8c6b7a8f', '1')">Chromie Squiggle #1</a>
-            <a class="example-link" onclick="loadExample('0x059edd72cd353df5106d2b9cc5ab83a52287ac3a', '23000000')">Memories of Qilin #0</a>
-            <a class="example-link" onclick="loadExample('0xa7d8d9ef8d8ce3a2f2ad8b4d1b6e3a5b8c6b7a8f', '71')">Chromie Squiggle #71</a>
-        </div>
     </div>
     
     <iframe id="artworkFrame"></iframe>
-    
-    <div id="controls" class="controls" style="display: none;">
-        <button class="control-btn" onclick="showForm()">New Artwork</button>
-        <button class="control-btn" onclick="location.reload()">Refresh</button>
-    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
-        // ArtBlocks On-Chain Generator contract address (corrected)
+        // ArtBlocks On-Chain Generator contract address
         const GENERATOR_CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
         
-        // Contract ABI for the on-chain generator (updated with correct functions)
+        // Contract ABI for the on-chain generator
         const GENERATOR_ABI = [
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "_coreContract", "type": "address"},
-                    {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
-                ],
-                "name": "getTokenHtml",
-                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
-                "stateMutability": "view",
-                "type": "function"
-            },
             {
                 "inputs": [
                     {"internalType": "address", "name": "_coreContract", "type": "address"},
@@ -279,166 +103,106 @@
             }
         ];
         
-        let currentContract = '';
-        let currentTokenId = '';
-        
-        // Initialize the application
-        async function init() {
-            // Parse URL parameters
-            const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
-            
-            // Check if we have contract address and token ID in URL
-            if (pathParts.length >= 2) {
-                const contractAddress = pathParts[pathParts.length - 2];
-                const tokenId = pathParts[pathParts.length - 1];
-                
-                // Validate contract address format
-                if (contractAddress.startsWith('0x') && contractAddress.length === 42) {
-                    currentContract = contractAddress;
-                    currentTokenId = tokenId;
-                    await loadArtworkFromChain();
-                    return;
-                }
-            }
-            
-            // If no valid URL params, show the form
-            showForm();
-        }
-        
-        function showForm() {
-            hideAll();
-            document.getElementById('form').style.display = 'block';
-        }
-        
-        function hideAll() {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('error').style.display = 'none';
-            document.getElementById('form').style.display = 'none';
-            document.getElementById('controls').style.display = 'none';
-        }
-        
         function showError(message) {
-            hideAll();
+            document.getElementById('loading').style.display = 'none';
             document.getElementById('errorMessage').textContent = message;
             document.getElementById('error').style.display = 'block';
         }
         
-        function showLoading() {
-            hideAll();
-            document.getElementById('loading').style.display = 'block';
-        }
-        
-        function loadExample(contract, tokenId) {
-            document.getElementById('contractAddress').value = contract;
-            document.getElementById('tokenId').value = tokenId;
-            loadArtwork();
-        }
-        
         async function loadArtwork() {
-            const contractInput = document.getElementById('contractAddress');
-            const tokenIdInput = document.getElementById('tokenId');
-            
-            currentContract = contractInput.value.trim();
-            currentTokenId = tokenIdInput.value.trim();
-            
-            // Basic validation
-            if (!currentContract || !currentTokenId) {
-                alert('Please enter both contract address and token ID');
-                return;
-            }
-            
-            if (!currentContract.startsWith('0x') || currentContract.length !== 42) {
-                alert('Please enter a valid contract address (0x...)');
-                return;
-            }
-            
-            if (isNaN(currentTokenId) || currentTokenId < 0) {
-                alert('Please enter a valid token ID');
-                return;
-            }
-            
-            // Update URL without reloading
-            const newUrl = `${window.location.origin}${window.location.pathname}${currentContract}/${currentTokenId}`;
-            window.history.pushState({}, '', newUrl);
-            
-            await loadArtworkFromChain();
-        }
-        
-        async function loadArtworkFromChain() {
-            showLoading();
-            
             try {
-                // Create a provider to connect to Ethereum mainnet using your Infura key
-                // This provides professional-grade reliability and performance
-                const INFURA_PROJECT_ID = 'e29898f2b78f4810ae2d0ce4c2a4a449';
-                const rpcUrl = `https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}`;
+                // Parse URL hash to extract contract address and token ID
+                const hash = window.location.hash.slice(1); // Remove the '#'
+                const pathParts = hash.split('/').filter(part => part.length > 0);
                 
-                const provider = new ethers.JsonRpcProvider(rpcUrl);
-                
-                console.log(`Loading artwork for contract: ${currentContract}, token: ${currentTokenId}`);
-                
-                // Create a contract instance
-                const contract = new ethers.Contract(GENERATOR_CONTRACT, GENERATOR_ABI, provider);
-                
-                // Call the on-chain generator to get the artwork HTML
-                // Using getTokenHtmlBase64EncodedDataUri to get a data URI we can directly use in iframe
-                const result = await contract.getTokenHtmlBase64EncodedDataUri(currentContract, currentTokenId);
-                
-                console.log('Received token URI:', result);
-                
-                // The result should be a data URI containing the HTML
-                if (!result || !result.startsWith('data:text/html;base64,')) {
-                    throw new Error('Invalid response from on-chain generator. This might not be a supported ArtBlocks token.');
+                if (pathParts.length < 2) {
+                    throw new Error('Invalid URL format. Expected: /#/[contract-address]/[token-id]');
                 }
                 
-                // Display the artwork in the iframe
+                const contractAddress = pathParts[pathParts.length - 2];
+                const tokenId = pathParts[pathParts.length - 1];
+                
+                // Validate contract address format
+                if (!contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+                    throw new Error('Invalid contract address format');
+                }
+                
+                // Validate token ID
+                if (isNaN(tokenId) || tokenId < 0) {
+                    throw new Error('Invalid token ID');
+                }
+                
+                // Connect to Ethereum mainnet
+                const INFURA_PROJECT_ID = 'e29898f2b78f4810ae2d0ce4c2a4a449';
+                const rpcUrl = `https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}`;
+                const provider = new ethers.JsonRpcProvider(rpcUrl);
+                
+                // Create contract instance
+                const contract = new ethers.Contract(GENERATOR_CONTRACT, GENERATOR_ABI, provider);
+                
+                // Get artwork HTML from blockchain
+                const result = await contract.getTokenHtmlBase64EncodedDataUri(contractAddress, tokenId);
+                
+                // Validate response
+                if (!result || !result.startsWith('data:text/html;base64,')) {
+                    throw new Error('This token is not supported by the on-chain generator or does not exist');
+                }
+                
+                // Decode the HTML content to check which library is used
+                const base64Data = result.split(',')[1];
+                const htmlContent = atob(base64Data);
+                
                 const iframe = document.getElementById('artworkFrame');
-                iframe.src = result;
                 
-                // Show the iframe and controls
-                hideAll();
+                // Check if it's Processing.js (which has SecurityError issues) or p5.js
+                const isProcessingJs = htmlContent.includes('processing.min.js') || 
+                                     htmlContent.includes('processing.js') || 
+                                     htmlContent.includes('Processing(');
+                
+                if (isProcessingJs) {
+                    // For Processing.js: write content directly to avoid SecurityError
+                    iframe.onload = function() {
+                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                        iframeDoc.open();
+                        iframeDoc.write(htmlContent);
+                        iframeDoc.close();
+                    };
+                    iframe.src = 'about:blank';
+                } else {
+                    // For p5.js and other libraries: use data URI (works fine)
+                    iframe.src = result;
+                }
+                
+                document.getElementById('loading').style.display = 'none';
                 iframe.style.display = 'block';
-                document.getElementById('controls').style.display = 'block';
-                
-                console.log('Artwork loaded successfully');
                 
             } catch (error) {
                 console.error('Error loading artwork:', error);
                 
-                let errorMessage = 'Failed to load artwork from the blockchain. ';
+                let errorMessage = 'Failed to load artwork. ';
                 
-                if (error.message.includes('Invalid response')) {
-                    errorMessage += 'This token may not be supported by the on-chain generator, or the contract address/token ID may be incorrect.';
+                if (error.message.includes('Invalid URL format')) {
+                    errorMessage = 'Invalid URL format. Please use: /#/[contract-address]/[token-id]';
+                } else if (error.message.includes('Invalid contract address')) {
+                    errorMessage = 'Invalid contract address format. Please provide a valid Ethereum address.';
+                } else if (error.message.includes('Invalid token ID')) {
+                    errorMessage = 'Invalid token ID. Please provide a valid number.';
+                } else if (error.message.includes('not supported') || error.message.includes('does not exist')) {
+                    errorMessage = 'This token is not supported by the on-chain generator or does not exist.';
                 } else if (error.message.includes('network') || error.message.includes('fetch')) {
-                    errorMessage += 'Please check your internet connection and try again.';
+                    errorMessage = 'Network error. Please check your internet connection.';
                 } else if (error.message.includes('revert') || error.message.includes('execution reverted')) {
-                    errorMessage += 'The blockchain call failed. Please verify the contract address and token ID are correct.';
+                    errorMessage = 'Blockchain call failed. The contract address and token ID combination may be invalid.';
                 } else {
-                    errorMessage += `Error: ${error.message}`;
+                    errorMessage += error.message;
                 }
                 
                 showError(errorMessage);
             }
         }
         
-        // Handle keyboard shortcuts
-        document.addEventListener('keydown', function(event) {
-            // Press 'R' to reload
-            if (event.key === 'r' || event.key === 'R') {
-                location.reload();
-            }
-            // Press 'N' for new artwork
-            if (event.key === 'n' || event.key === 'N') {
-                showForm();
-            }
-            // Press 'Escape' to show form
-            if (event.key === 'Escape') {
-                showForm();
-            }
-        });
-        
-        // Initialize when the page loads
-        window.addEventListener('DOMContentLoaded', init);
+        // Initialize when page loads
+        window.addEventListener('DOMContentLoaded', loadArtwork);
     </script>
 </body>
 </html>
