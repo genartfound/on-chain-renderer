@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>On-Chain Artwork Metadata</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
+    <style>
+        body { font-family: monospace; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Loading on-chain metadata...</div>
+    <div id="metadata-content" style="display: none;"></div>
+
+    <script>
+        // Contract ABIs - defined once for reuse
+        const LEGACY_ABI = [
+            "function projectDetails(uint256 projectId) view returns (string, string, string, string, string, bool)",
+            "function projectScriptInfo(uint256 projectId) view returns (string, uint256, bool, string, bool, bool)",
+            "function projectTokenInfo(uint256 projectId) view returns (address, uint256, uint256, uint256, bool, address, uint256, string, address)",
+            "function tokenIdToHash(uint256 tokenId) view returns (bytes32)"
+        ];
+
+        const LEGACY_7_PARAM_ABI = [
+            "function projectDetails(uint256 projectId) view returns (string, string, string, string, string, bool)",
+            "function projectScriptInfo(uint256 projectId) view returns (string, uint256, bool, string, bool, bool)",
+            "function projectTokenInfo(uint256 projectId) view returns (address, uint256, uint256, uint256, bool, address, uint256)",
+            "function showTokenHashes(uint256 tokenId) view returns (bytes32[])"
+        ];
+
+        const NEWER_ABI = [
+            "function projectDetails(uint256 projectId) view returns (string, string, string, string, string)",
+            "function projectScriptDetails(uint256 projectId) view returns (string, string, uint256)",
+            "function projectStateData(uint256 projectId) view returns (uint256, uint256, bool, bool, uint256, bool)",
+            "function tokenIdToHash(uint256 tokenId) view returns (bytes32)"
+        ];
+
+        const RENDERER_CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
+        const RENDERER_ABI = [
+            "function getProjectScript(address coreContract, uint256 projectId) view returns (string)"
+        ];
+
+
+
+        async function loadMetadata() {
+            try {
+                const hash = window.location.hash.substring(1);
+                const parts = hash.split('/');
+                
+                if (parts.length !== 3) {
+                    throw new Error('Invalid URL format. Expected: #/contractAddress/tokenId');
+                }
+                
+                const contractAddress = parts[1];
+                const actualTokenId = parseInt(parts[2]);
+                
+                // Calculate project ID from token ID
+                // Art Blocks uses: projectId * 1000000 + tokenId (except project 0)
+                const projectId = Math.floor(actualTokenId / 1000000);
+                const inputTokenId = projectId === 0 ? actualTokenId : actualTokenId % 1000000;
+                
+                const metadata = await fetchTokenMetadata(contractAddress, projectId, actualTokenId, inputTokenId);
+                displayMetadata(metadata);
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('metadata-content').style.display = 'block';
+                
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `<h2>Error</h2><p>${error.message}</p>`;
+            }
+        }
+
+        async function fetchTokenMetadata(contractAddress, projectId, actualTokenId, inputTokenId) {
+            const metadata = {
+                project: {
+                    projectId: projectId,
+                    contractAddress: contractAddress
+                },
+                token: {
+                    tokenId: actualTokenId,
+                    inputTokenId: inputTokenId,
+                    mintTimestamp: null,
+                    mintTransactionHash: null
+                },
+                script: {
+                    content: []
+                },
+                contractData: {
+                    projectDetails: null,
+                    projectScriptInfo: null,
+                    projectTokenInfo: null,
+                    tokenHash: null
+                }
+            };
+
+            await fetchContractData(metadata, contractAddress, projectId, actualTokenId);
+            return metadata;
+        }
+
+        async function fetchContractData(metadata, contractAddress, projectId, tokenId) {
+            const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449');
+
+            // Determine contract type and create appropriate contract instance
+            const isLegacy7Param = contractAddress.toLowerCase() === '0x059edd72cd353df5106d2b9cc5ab83a52287ac3a';
+            const isLegacyFull = contractAddress.toLowerCase() === '0xa7d8d9ef8d8ce8992df33d8b8cf4aebabd5bd270' || 
+                                contractAddress.toLowerCase() === '0x64780ce53f6e966e18a22af13a2f97369580ec11';
+
+            let contract, contractType;
+            if (isLegacy7Param) {
+                contract = new ethers.Contract(contractAddress, LEGACY_7_PARAM_ABI, provider);
+                contractType = 'legacy7';
+            } else if (isLegacyFull) {
+                contract = new ethers.Contract(contractAddress, LEGACY_ABI, provider);
+                contractType = 'legacyFull';
+            } else {
+                contract = new ethers.Contract(contractAddress, NEWER_ABI, provider);
+                contractType = 'newer';
+            }
+
+            // 1. Get projectDetails
+            try {
+                const result = await contract.projectDetails(projectId);
+                const projectDetailsData = {
+                    projectName: result[0],
+                    artist: result[1], 
+                    description: result[2],
+                    website: result[3],
+                    license: result[4],
+                    dynamic: contractType === 'newer' ? 'Unknown' : result[5]
+                };
+                
+                metadata.contractData.projectDetails = projectDetailsData;
+
+            } catch (e) {
+                console.warn('Failed to get projectDetails:', e.message);
+            }
+
+            // 2. Get projectScriptInfo  
+            try {
+                let scriptInfoData = {};
+                
+                if (contractType === 'newer') {
+                    // Newer contracts use projectScriptDetails
+                    const result = await contract.projectScriptDetails(projectId);
+                    
+                    // Parse scriptTypeAndVersion (e.g., "p5@1.0.0")
+                    const scriptTypeAndVersion = result[0];
+                    const parts = scriptTypeAndVersion.split('@');
+                    const scriptType = parts[0] || 'Unknown';
+                    const scriptVersion = parts[1] || 'Unknown';
+                    
+                    // Create a synthetic scriptJSON to match expected structure
+                    const syntheticJSON = JSON.stringify({
+                        type: scriptType,
+                        version: scriptVersion,
+                        aspectRatio: parseFloat(result[1]) || 'Unknown'
+                    });
+                    
+                    scriptInfoData = {
+                        scriptJSON: syntheticJSON,
+                        scriptCount: parseInt(result[2]),
+                        useHashString: 'Unknown',
+                        ipfsHash: 'Unknown',
+                        locked: 'Unknown',
+                        paused: 'Unknown'
+                    };
+                } else {
+                    // Legacy contracts use projectScriptInfo
+                    const result = await contract.projectScriptInfo(projectId);
+                    scriptInfoData = {
+                        scriptJSON: result[0],
+                        scriptCount: parseInt(result[1]),
+                        useHashString: result[2],
+                        ipfsHash: result[3],
+                        locked: result[4],
+                        paused: result[5]
+                    };
+                }
+
+                metadata.contractData.projectScriptInfo = scriptInfoData;
+
+            } catch (e) {
+                console.warn('Failed to get projectScriptInfo:', e.message);
+            }
+
+            // 3. Get projectTokenInfo
+            try {
+                let tokenInfoData = {};
+                
+                if (contractType === 'legacy7') {
+                    // Legacy 7-parameter projectTokenInfo
+                    const result = await contract.projectTokenInfo(projectId);
+                    tokenInfoData = {
+                        artistAddress: result[0],
+                        pricePerTokenInWei: result[1].toString(),
+                        invocations: parseInt(result[2]),
+                        maxInvocations: parseInt(result[3]),
+                        active: result[4],
+                        additionalPayee: result[5],
+                        additionalPayeePercentage: parseInt(result[6]),
+                        currency: 'Unknown',
+                        currencyAddress: 'Unknown'
+                    };
+                } else if (contractType === 'legacyFull') {
+                    // Legacy full 9-parameter projectTokenInfo
+                    const result = await contract.projectTokenInfo(projectId);
+                    tokenInfoData = {
+                        artistAddress: result[0],
+                        pricePerTokenInWei: result[1].toString(),
+                        invocations: parseInt(result[2]),
+                        maxInvocations: parseInt(result[3]),
+                        active: result[4],
+                        additionalPayee: result[5],
+                        additionalPayeePercentage: parseInt(result[6]),
+                        currency: result[7],
+                        currencyAddress: result[8]
+                    };
+                } else {
+                    // Newer contracts use projectStateData
+                    const result = await contract.projectStateData(projectId);
+                    tokenInfoData = {
+                        artistAddress: 'Unknown',
+                        pricePerTokenInWei: 'Unknown',
+                        invocations: parseInt(result[0]),
+                        maxInvocations: parseInt(result[1]),
+                        active: result[2],
+                        additionalPayee: 'Unknown',
+                        additionalPayeePercentage: 'Unknown',
+                        currency: 'Unknown',
+                        currencyAddress: 'Unknown'
+                    };
+                }
+
+                metadata.contractData.projectTokenInfo = tokenInfoData;
+
+            } catch (e) {
+                console.warn('Failed to get projectTokenInfo:', e.message);
+            }
+
+            // 4. Get tokenIdToHash
+            try {
+                if (contractType === 'legacy7') {
+                    // This contract uses showTokenHashes which returns an array
+                    const result = await contract.showTokenHashes(tokenId);
+                    metadata.contractData.tokenHash = result[0];
+                } else {
+                    // Standard tokenIdToHash function
+                    const result = await contract.tokenIdToHash(tokenId);
+                    metadata.contractData.tokenHash = result;
+                }
+            } catch (e) {
+                console.warn('Failed to get token hash:', e.message);
+            }
+
+                        // 5. Get script content using renderer contract
+            try {
+                const rendererContract = new ethers.Contract(RENDERER_CONTRACT, RENDERER_ABI, provider);
+                const scriptContent = await rendererContract.getProjectScript(contractAddress, projectId);
+                metadata.script.content = [scriptContent];
+            } catch (e) {
+                console.warn('Failed to get script content from renderer contract:', e.message);
+            }
+
+            // 6. Try to get mint timestamp
+            try {
+                const filter = {
+                    address: contractAddress,
+                    topics: [
+                        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', // Transfer event
+                        '0x0000000000000000000000000000000000000000000000000000000000000000', // from null address
+                        null,
+                        ethers.zeroPadValue(ethers.toBeHex(tokenId), 32)
+                    ],
+                    fromBlock: 0,
+                    toBlock: 'latest'
+                };
+                
+                const logs = await provider.getLogs(filter);
+                if (logs.length > 0) {
+                    // Store the transaction hash
+                    metadata.token.mintTransactionHash = logs[0].transactionHash;
+                    
+                    const block = await provider.getBlock(logs[0].blockNumber);
+                    if (block) {
+                        metadata.token.mintTimestamp = new Date(block.timestamp * 1000).toISOString();
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not fetch mint transaction info:', e);
+            }
+        }
+
+        function displayMetadata(metadata) {
+            const formatField = (label, value) => {
+                const displayValue = value !== null && value !== undefined ? value.toString() : 'Unknown';
+                return `${label}: ${displayValue}\n`;
+            };
+
+            let content = '';
+
+            content += 'PROJECT INFORMATION\n';
+            content += '===================\n';
+            content += formatField('Contract Address', metadata.project.contractAddress);
+            content += formatField('Project ID', metadata.project.projectId);
+            content += formatField('Project Name', metadata.contractData.projectDetails.projectName);
+            content += formatField('Artist', metadata.contractData.projectDetails.artist);
+            content += formatField('Max Invocations', metadata.contractData.projectTokenInfo?.maxInvocations);
+            content += formatField('Description', metadata.contractData.projectDetails.description);
+            content += formatField('Website', metadata.contractData.projectDetails.website);
+            content += formatField('License', metadata.contractData.projectDetails.license);
+            content += '\n';
+
+            content += 'TOKEN INFORMATION\n';
+            content += '=================\n';
+            content += formatField('Artwork Name', metadata.contractData.projectDetails.projectName + ' #' + metadata.token.inputTokenId);
+            content += formatField('Token ID', metadata.token.tokenId);
+            content += formatField('Token Hash', metadata.contractData.tokenHash);
+            content += formatField('Mint Timestamp', metadata.token.mintTimestamp);
+            content += formatField('Mint Transaction Hash', metadata.token.mintTransactionHash);
+            content += '\n';
+
+            // Display projectScriptInfo results
+            content += 'SCRIPT INFORMATION\n';
+            content += '==================\n';
+            
+            // Parse and display Script Type and Version
+            try {
+                const scriptJSON = JSON.parse(metadata.contractData.projectScriptInfo?.scriptJSON || '{}');
+                content += formatField('Script Type', scriptJSON.type || 'Unknown');
+                content += formatField('Script Version', scriptJSON.version || 'Unknown');
+            } catch (e) {
+                content += formatField('Script Type', 'Unknown');
+                content += formatField('Script Version', 'Unknown');
+            }
+            content += '\n';
+
+            // Display script content
+            if (metadata.script.content && metadata.script.content.length > 0) {
+                content += 'SCRIPT CONTENT\n';
+                content += '==============\n';
+                content += metadata.script.content.join('') + '\n';
+            } else {
+                content += 'SCRIPT CONTENT\n';
+                content += '==============\n';
+                content += 'Script content not available from smart contract\n';
+            }
+
+            const preElement = document.createElement('pre');
+            preElement.textContent = content;
+            
+            const container = document.getElementById('metadata-content');
+            container.innerHTML = '';
+            container.appendChild(preElement);
+        }
+        
+        window.addEventListener('DOMContentLoaded', loadMetadata);
+    </script>
+</body>
+</html> 
