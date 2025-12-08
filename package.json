@@ -1,0 +1,18 @@
+{
+  "name": "on-chain-renderer",
+  "version": "1.0.0",
+  "description": "Art Blocks on-chain renderer with enhanced project data",
+  "main": "index.html",
+  "scripts": {
+    "test-enhancement": "node test-enhancement.js",
+    "enhance-data": "node enhance-projects-data.js",
+    "start": "python -m http.server 8000"
+  },
+  "dependencies": {
+    "ethers": "^6.13.1"
+  },
+  "devDependencies": {},
+  "keywords": ["art-blocks", "nft", "blockchain", "ethereum"],
+  "author": "",
+  "license": "MIT"
+}

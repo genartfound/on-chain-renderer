@@ -2999,6 +2999,36 @@
       "artistName": "James Merrill",
       "contractAddress": "0xab0000000000aa06f89b268d604a9c1c41524ac6",
       "projectId": 503
+    },
+    {
+      "projectName": "Gas Wars",
+      "artistName": "Jack Butcher",
+      "contractAddress": "0xab00000000002ade39f58f9d8278a31574ffbe77",
+      "projectId": 505
+    },
+    {
+      "projectName": "Quine",
+      "artistName": "Larva Labs",
+      "contractAddress": "0xab00000000002ade39f58f9d8278a31574ffbe77",
+      "projectId": 506
+    },
+    {
+      "projectName": "Drawings for a Monument",
+      "artistName": "Jeff Davis",
+      "contractAddress": "0xababababab20053426ad1c782de9ea8444358070",
+      "projectId": 3
+    },
+    {
+      "projectName": "Diggly Collects All",
+      "artistName": "DCA",
+      "contractAddress": "0xababababab20053426ad1c782de9ea8444358070",
+      "projectId": 4
+    },
+    {
+      "projectName": "send/receive",
+      "artistName": "Snowfro",
+      "contractAddress": "0xababababab20053426ad1c782de9ea8444358070",
+      "projectId": 5
     }
   ]
 }
