@@ -73,6 +73,44 @@
             const formattedMsg = msg.replace(/\n/g, '<br>');
             status.innerHTML = `<div class="error">${formattedMsg}</div>`;
         }
+
+        // Some newer dependencies (e.g. ESM Three.js builds) ship as ES
+        // modules but the generator-assembled HTML doesn't always mark
+        // their <script> tags as type="module". A classic-script parser
+        // throws on 'export'/static 'import' the instant it hits them, so
+        // nothing after that tag runs. Detect that signature and patch it
+        // before injection rather than touching the on-chain data itself.
+        function fixModuleScripts(html) {
+            let doc;
+            try {
+                doc = new DOMParser().parseFromString(html, 'text/html');
+            } catch (e) {
+                return html; // malformed doc - leave as-is, let it fail loudly
+            }
+
+            const scripts = Array.from(doc.querySelectorAll('script'));
+            const looksLikeModule = (el) => {
+                const src = el.getAttribute('src') || '';
+                const body = el.textContent || '';
+                return /\.module\.[^/?#]*\.js(\?|#|$)/i.test(src) ||
+                       /^\s*export\s/.test(body) ||
+                       /\bimport\s*\*\s*as\s+\w+\s+from\s+['"]/.test(body) ||
+                       /\bimport\s*\{[^}]*\}\s*from\s+['"]/.test(body) ||
+                       /^\s*import\s+['"]/.test(body);
+            };
+
+            const needsModule = scripts.some(
+                (s) => s.getAttribute('type') !== 'module' && looksLikeModule(s)
+            );
+            if (!needsModule) return html;
+
+            // Module scripts execute deferred, in their own scope. Mixing
+            // module and classic scripts in one page changes execution
+            // order guarantees, so once any tag needs it, mark all script
+            // tags consistently rather than partially converting.
+            scripts.forEach((s) => s.setAttribute('type', 'module'));
+            return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+        }
         
         async function load() {
             try {
@@ -98,20 +136,18 @@
                 }
                 
                 const frame = document.getElementById('frame');
-                const html = atob(result.split(',')[1]);
-                
-                if (html.includes('processing.min.js') || html.includes('Processing(')) {
-                    frame.onload = () => {
-                        const doc = frame.contentDocument;
-                        doc.open();
-                        doc.write(html);
-                        doc.close();
-                    };
-                    frame.src = 'about:blank';
-                } else {
-                    frame.src = result;
-                }
-                
+                let html = atob(result.split(',')[1]);
+                html = fixModuleScripts(html);
+
+                // srcdoc keeps the frame same-origin with the parent page.
+                // frame.src = 'data:text/html;base64,...' gives the frame an
+                // OPAQUE origin instead - fine for most projects, but breaks
+                // anything that touches storage APIs, postMessage, or a
+                // same-origin CORS check from inside the artwork. Art Blocks'
+                // own reference viewer (github.com/ArtBlocks/on-chain-generator-viewer)
+                // uses srcDoc for exactly this reason.
+                frame.srcdoc = html;
+
                 document.getElementById('status').style.display = 'none';
                 frame.style.display = 'block';
                 
