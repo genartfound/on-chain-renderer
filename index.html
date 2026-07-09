@@ -78,57 +78,6 @@
             const formattedMsg = msg.replace(/\n/g, '<br>');
             status.innerHTML = `<div class="error">${formattedMsg}</div>`;
         }
-
-        // Some newer dependencies (e.g. ESM Three.js builds) ship as ES
-        // modules but the generator-assembled HTML doesn't always mark
-        // their <script> tags as type="module". A classic-script parser
-        // throws on 'export'/static 'import' the instant it hits them, so
-        // nothing after that tag runs. Detect that signature and patch it
-        // before injection rather than touching the on-chain data itself.
-        //
-        // IMPORTANT: only classic-JS scripts are eligible. Pages also carry
-        // non-JS script blocks - <script type="importmap">, GLSL shaders
-        // (type="x-shader/..."), JSON data blocks, HTML templates. Setting
-        // type="module" on those makes the browser execute non-JS as JS,
-        // which is itself a source of "Unexpected token '<'" errors.
-        function isClassicJs(el) {
-            const t = (el.getAttribute('type') || '').trim().toLowerCase();
-            return t === '' || t === 'text/javascript' || t === 'application/javascript';
-        }
-
-        function fixModuleScripts(html) {
-            let doc;
-            try {
-                doc = new DOMParser().parseFromString(html, 'text/html');
-            } catch (e) {
-                return html; // malformed doc - leave as-is, let it fail loudly
-            }
-
-            const scripts = Array.from(doc.querySelectorAll('script'));
-            const looksLikeModule = (el) => {
-                const src = el.getAttribute('src') || '';
-                const body = el.textContent || '';
-                return /\.module\.[^/?#]*\.js(\?|#|$)/i.test(src) ||
-                       /^\s*export\s/.test(body) ||
-                       /\bimport\s*\*\s*as\s+\w+\s+from\s+['"]/.test(body) ||
-                       /\bimport\s*\{[^}]*\}\s*from\s+['"]/.test(body) ||
-                       /^\s*import\s+['"]/.test(body);
-            };
-
-            const classicScripts = scripts.filter(isClassicJs);
-            const needsModule = classicScripts.some(looksLikeModule);
-            if (!needsModule) return html;
-
-            // Module scripts execute deferred, in their own scope. Mixing
-            // module and classic scripts in one page changes execution
-            // order guarantees, so convert all classic-JS tags together -
-            // but leave typed non-JS blocks (importmap, shaders, JSON,
-            // templates) strictly alone.
-            classicScripts.forEach((s) => s.setAttribute('type', 'module'));
-            console.info('[gaf-renderer] ES module signature detected; ' +
-                classicScripts.length + ' classic script tag(s) converted to type="module"');
-            return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
-        }
         
         async function load() {
             try {
@@ -154,16 +103,20 @@
                 }
 
                 const frame = document.getElementById('frame');
-                const html = fixModuleScripts(result);
 
-                // srcdoc keeps the frame same-origin with the parent page.
-                // frame.src = 'data:text/html;base64,...' gives the frame an
-                // OPAQUE origin instead - fine for most projects, but breaks
-                // anything that touches storage APIs, postMessage, or a
-                // same-origin CORS check from inside the artwork. Art Blocks'
-                // own reference viewer (github.com/ArtBlocks/on-chain-generator-viewer)
-                // uses srcDoc for exactly this reason.
-                frame.srcdoc = html;
+                // Inject the EXACT string the contract returns. Do not parse,
+                // rewrite, or re-serialize it. The generator can embed a full
+                // nested HTML document inside a <script> block (e.g. Quine),
+                // and any HTML parser - including DOMParser - terminates that
+                // wrapper at the first literal "<\/script>" it finds, silently
+                // truncating the payload. The raw string is already valid when
+                // the browser parses it once, in place, as the frame document.
+                //
+                // srcdoc (not src="data:...") keeps the frame same-origin with
+                // the parent, which projects with embedded editors / storage /
+                // postMessage (e.g. send/receive) require. This matches Art
+                // Blocks' reference viewer (on-chain-generator-viewer, App.tsx).
+                frame.srcdoc = result;
 
                 document.getElementById('status').style.display = 'none';
                 frame.style.display = 'block';
