@@ -57,17 +57,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
         const CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
-        // getTokenHtml returns the assembled document as a plain string.
-        // The previous getTokenHtmlBase64EncodedDataUri + atob() path
-        // corrupted any non-ASCII bytes (atob decodes to Latin-1, not
-        // UTF-8). ethers' ABI string decoding handles UTF-8 correctly,
-        // and this matches Art Blocks' reference viewer call-for-call.
         const ABI = [{
             "inputs": [
-                {"internalType": "address", "name": "coreContract", "type": "address"},
-                {"internalType": "uint256", "name": "tokenId", "type": "uint256"}
+                {"internalType": "address", "name": "_coreContract", "type": "address"},
+                {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
             ],
-            "name": "getTokenHtml",
+            "name": "getTokenHtmlBase64EncodedDataUri",
             "outputs": [{"internalType": "string", "name": "", "type": "string"}],
             "stateMutability": "view",
             "type": "function"
@@ -93,31 +88,30 @@
                 
                 let result;
                 try {
-                    result = await instance.getTokenHtml(contract, tokenId);
+                    result = await instance.getTokenHtmlBase64EncodedDataUri(contract, tokenId);
                 } catch (contractError) {
                     throw new Error('Token not supported');
                 }
-
-                if (!result || typeof result !== 'string' || result.length < 20) {
+                
+                if (!result || result === '' || result === '0x' || result.length < 20 || !result.startsWith('data:text/html;base64,')) {
                     throw new Error('Token not supported');
                 }
-
+                
                 const frame = document.getElementById('frame');
-
-                // Inject the EXACT string the contract returns. Do not parse,
-                // rewrite, or re-serialize it. The generator can embed a full
-                // nested HTML document inside a <script> block (e.g. Quine),
-                // and any HTML parser - including DOMParser - terminates that
-                // wrapper at the first literal "<\/script>" it finds, silently
-                // truncating the payload. The raw string is already valid when
-                // the browser parses it once, in place, as the frame document.
-                //
-                // srcdoc (not src="data:...") keeps the frame same-origin with
-                // the parent, which projects with embedded editors / storage /
-                // postMessage (e.g. send/receive) require. This matches Art
-                // Blocks' reference viewer (on-chain-generator-viewer, App.tsx).
-                frame.srcdoc = result;
-
+                const html = atob(result.split(',')[1]);
+                
+                if (html.includes('processing.min.js') || html.includes('Processing(')) {
+                    frame.onload = () => {
+                        const doc = frame.contentDocument;
+                        doc.open();
+                        doc.write(html);
+                        doc.close();
+                    };
+                    frame.src = 'about:blank';
+                } else {
+                    frame.src = result;
+                }
+                
                 document.getElementById('status').style.display = 'none';
                 frame.style.display = 'block';
                 
