@@ -57,12 +57,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
         const CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
+        // getTokenHtml returns the assembled document as a plain string.
+        // The previous getTokenHtmlBase64EncodedDataUri + atob() path
+        // corrupted any non-ASCII bytes (atob decodes to Latin-1, not
+        // UTF-8). ethers' ABI string decoding handles UTF-8 correctly,
+        // and this matches Art Blocks' reference viewer call-for-call.
         const ABI = [{
             "inputs": [
-                {"internalType": "address", "name": "_coreContract", "type": "address"},
-                {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
+                {"internalType": "address", "name": "coreContract", "type": "address"},
+                {"internalType": "uint256", "name": "tokenId", "type": "uint256"}
             ],
-            "name": "getTokenHtmlBase64EncodedDataUri",
+            "name": "getTokenHtml",
             "outputs": [{"internalType": "string", "name": "", "type": "string"}],
             "stateMutability": "view",
             "type": "function"
@@ -80,6 +85,17 @@
         // throws on 'export'/static 'import' the instant it hits them, so
         // nothing after that tag runs. Detect that signature and patch it
         // before injection rather than touching the on-chain data itself.
+        //
+        // IMPORTANT: only classic-JS scripts are eligible. Pages also carry
+        // non-JS script blocks - <script type="importmap">, GLSL shaders
+        // (type="x-shader/..."), JSON data blocks, HTML templates. Setting
+        // type="module" on those makes the browser execute non-JS as JS,
+        // which is itself a source of "Unexpected token '<'" errors.
+        function isClassicJs(el) {
+            const t = (el.getAttribute('type') || '').trim().toLowerCase();
+            return t === '' || t === 'text/javascript' || t === 'application/javascript';
+        }
+
         function fixModuleScripts(html) {
             let doc;
             try {
@@ -99,16 +115,18 @@
                        /^\s*import\s+['"]/.test(body);
             };
 
-            const needsModule = scripts.some(
-                (s) => s.getAttribute('type') !== 'module' && looksLikeModule(s)
-            );
+            const classicScripts = scripts.filter(isClassicJs);
+            const needsModule = classicScripts.some(looksLikeModule);
             if (!needsModule) return html;
 
             // Module scripts execute deferred, in their own scope. Mixing
             // module and classic scripts in one page changes execution
-            // order guarantees, so once any tag needs it, mark all script
-            // tags consistently rather than partially converting.
-            scripts.forEach((s) => s.setAttribute('type', 'module'));
+            // order guarantees, so convert all classic-JS tags together -
+            // but leave typed non-JS blocks (importmap, shaders, JSON,
+            // templates) strictly alone.
+            classicScripts.forEach((s) => s.setAttribute('type', 'module'));
+            console.info('[gaf-renderer] ES module signature detected; ' +
+                classicScripts.length + ' classic script tag(s) converted to type="module"');
             return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
         }
         
@@ -126,18 +144,17 @@
                 
                 let result;
                 try {
-                    result = await instance.getTokenHtmlBase64EncodedDataUri(contract, tokenId);
+                    result = await instance.getTokenHtml(contract, tokenId);
                 } catch (contractError) {
                     throw new Error('Token not supported');
                 }
-                
-                if (!result || result === '' || result === '0x' || result.length < 20 || !result.startsWith('data:text/html;base64,')) {
+
+                if (!result || typeof result !== 'string' || result.length < 20) {
                     throw new Error('Token not supported');
                 }
-                
+
                 const frame = document.getElementById('frame');
-                let html = atob(result.split(',')[1]);
-                html = fixModuleScripts(html);
+                const html = fixModuleScripts(result);
 
                 // srcdoc keeps the frame same-origin with the parent page.
                 // frame.src = 'data:text/html;base64,...' gives the frame an
