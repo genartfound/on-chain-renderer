@@ -95,45 +95,49 @@
         // other and this switch get removed.
         // ---------------------------------------------------------------
 
+        // The shim's core logic, shared by both placements. Written WITHOUT
+        // regex literals on purpose: this string is nested inside a template
+        // literal here, then injected as text into the frame, then parsed by
+        // the browser. Regex backslashes do not survive those layers cleanly
+        // (an earlier version double-escaped /\/ipfs\// and broke the frame).
+        // indexOf/slice string parsing has no escaping hazard, so it is used
+        // instead. The closing script tag is split as '<' + '/script>' so it
+        // cannot terminate THIS document's script block early.
+        const SHIM_CORE = [
+            "var preferred = null;",
+            "try { if (tokenData && typeof tokenData.preferredIPFSGateway === 'string' && tokenData.preferredIPFSGateway) { preferred = tokenData.preferredIPFSGateway; while (preferred.charAt(preferred.length-1) === '/') preferred = preferred.slice(0, -1); } } catch(e){}",
+            "if (!preferred) return;",
+            // Extract '<CID>/<path>' after the '/ipfs/' segment using indexOf.
+            "function tail(u){ if (typeof u !== 'string') return null; var k = u.indexOf('/ipfs/'); return k === -1 ? null : u.slice(k + 6); }",
+            "function makeWrapper(_li){",
+            "  var w = function(path, ok, fail){",
+            "    var t = tail(path);",
+            "    if (!t) return _li.apply(this, arguments);",
+            "    var alt = preferred + '/' + t, self = this;",
+            "    return _li.call(self, path, ok, function(){ try{console.info('[gaf] IPFS fallback ->', alt);}catch(e){} _li.call(self, alt, ok, fail); });",
+            "  };",
+            "  for (var k in _li){ try{ w[k] = _li[k]; }catch(e){} }",
+            "  return w;",
+            "}"
+        ].join("\n");
+
+        const CLOSE_SCRIPT = "<" + "/script>";
+
         // Placement B: synchronous wrap, injected AFTER the gunzip bootstrap
-        // and BEFORE the artist script. Assumes loadImage already exists.
-        const SHIM_B = `<script>(function(){
-  if (typeof window.loadImage !== 'function') return;
-  var preferred = null;
-  try { if (tokenData && typeof tokenData.preferredIPFSGateway === 'string' && tokenData.preferredIPFSGateway) preferred = tokenData.preferredIPFSGateway.replace(/\\/+$/, ''); } catch(e){}
-  if (!preferred) return;
-  function tail(u){ var m = typeof u==='string' && u.match(/\\/ipfs\\/([^\\s"']+)/i); return m?m[1]:null; }
-  var _li = window.loadImage;
-  window.loadImage = function(path, ok, fail){
-    var t = tail(path);
-    if (!t) return _li.apply(this, arguments);
-    var alt = preferred + '/' + t, self = this;
-    return _li.call(self, path, ok, function(){ try{console.info('[gaf] IPFS fallback ->', alt);}catch(e){} _li.call(self, alt, ok, fail); });
-  };
-  for (var k in _li){ try{ window.loadImage[k] = _li[k]; }catch(e){} }
-})();<\/script>`;
+        // and BEFORE the artist script. loadImage already exists, wrap directly.
+        const SHIM_B = "<script>(function(){\n"
+            + "if (typeof window.loadImage !== 'function') return;\n"
+            + SHIM_CORE + "\n"
+            + "window.loadImage = makeWrapper(window.loadImage);\n"
+            + "})();" + CLOSE_SCRIPT;
 
         // Placement A: property-trap wrap, injected at document top BEFORE p5
-        // is inflated. Intercepts the assignment of window.loadImage so it is
-        // wrapped the instant p5 defines it, regardless of timing.
-        const SHIM_A = `<script>(function(){
-  var preferred = null;
-  try { if (tokenData && typeof tokenData.preferredIPFSGateway === 'string' && tokenData.preferredIPFSGateway) preferred = tokenData.preferredIPFSGateway.replace(/\\/+$/, ''); } catch(e){}
-  if (!preferred) return;
-  function tail(u){ var m = typeof u==='string' && u.match(/\\/ipfs\\/([^\\s"']+)/i); return m?m[1]:null; }
-  function wrap(_li){
-    var w = function(path, ok, fail){
-      var t = tail(path);
-      if (!t) return _li.apply(this, arguments);
-      var alt = preferred + '/' + t, self = this;
-      return _li.call(self, path, ok, function(){ try{console.info('[gaf] IPFS fallback ->', alt);}catch(e){} _li.call(self, alt, ok, fail); });
-    };
-    for (var k in _li){ try{ w[k] = _li[k]; }catch(e){} }
-    return w;
-  }
-  var _real;
-  Object.defineProperty(window, 'loadImage', { configurable:true, get:function(){return _real;}, set:function(fn){ _real = (typeof fn==='function') ? wrap(fn) : fn; } });
-})();<\/script>`;
+        // is inflated. Wrap loadImage the instant p5 assigns it.
+        const SHIM_A = "<script>(function(){\n"
+            + SHIM_CORE + "\n"
+            + "var _real;\n"
+            + "Object.defineProperty(window, 'loadImage', { configurable:true, get:function(){return _real;}, set:function(fn){ _real = (typeof fn==='function') ? makeWrapper(fn) : fn; } });\n"
+            + "})();" + CLOSE_SCRIPT;
 
         // Insert the shim into the wrapper HTML string. Uses targeted string
         // matching (NOT DOMParser) to avoid corrupting nested-script payloads
@@ -145,7 +149,9 @@
             if (mode === 'A') {
                 // Inject immediately after the first tokenData-defining script
                 // closes, near the top, before the dependency scripts.
-                const anchor = '</script>';
+                // NOTE: the closing tag is built by concatenation so this
+                // literal cannot terminate THIS page's own <script> block.
+                const anchor = '<' + '/script>';
                 const idx = html.indexOf(anchor);
                 if (idx === -1) return html;
                 const at = idx + anchor.length;
