@@ -220,23 +220,26 @@
 
                 const frame = document.getElementById('frame');
 
-                // Complete the wrapper: inject the gateway shim (default on;
-                // ?shim=off renders the exact on-chain bytes). Injection is
-                // targeted string insertion, never DOMParser, so nested-script
-                // payloads (Quine) are safe.
                 const enabled = shimEnabled();
-                const html = enabled ? injectShim(result) : result;
-                if (enabled) {
-                    try { console.info('[gaf] gateway shim active | html delta:', html.length - result.length, 'bytes'); } catch (e) {}
-                }
-
-                // Arm (or disarm) the network-level fallback worker with this
-                // token's chain-nominated gateway BEFORE the frame loads, so
-                // the worker controls the frame's requests from the start.
                 const preferred = enabled ? extractPreferredGateway(result) : null;
+
+                // Arm the network-level worker first. Its artist-first policy
+                // is the primary mechanism: original URLs (including self-
+                // authenticating ones with embedded gateway tokens) are tried
+                // as authored, and the preferred gateway is used only on
+                // observable failure.
                 const swActive = await setupServiceWorker(preferred);
+
+                // The in-page loadImage shim rewrites proactively, which can
+                // break projects whose hardcoded gateway works (e.g. token-
+                // authenticated URLs) when the preferred gateway lacks the
+                // content. It is therefore injected ONLY when the worker is
+                // unavailable, as degraded-mode coverage for p5 image loads.
+                const useShim = enabled && !swActive;
+                const html = useShim ? injectShim(result) : result;
+
                 if (enabled && preferred) {
-                    try { console.info('[gaf] network fallback worker:', swActive ? 'active' : 'unavailable', '| preferred gateway:', preferred); } catch (e) {}
+                    try { console.info('[gaf] gateway resilience:', swActive ? 'network worker (artist-first)' : (useShim ? 'in-page shim (degraded mode)' : 'none'), '| preferred gateway:', preferred); } catch (e) {}
                 }
 
                 frame.srcdoc = html;

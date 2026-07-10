@@ -58,6 +58,37 @@ self.addEventListener('fetch', function (event) {
   if (k === -1) return;
   if (url.indexOf(preferredGateway + '/') === 0) return;
 
+  // no-cors requests (media elements and classic script tags without
+  // crossOrigin) return OPAQUE responses whose status the worker cannot
+  // read - a 401 is indistinguishable from success, so retry-on-failure
+  // against the original is impossible. For these, try the preferred
+  // gateway FIRST, fetched in cors mode so its status IS readable (the
+  // preferred gateway serves CORS headers), and fall back to the original
+  // URL untouched on any failure - a 5xx from an unpinned CID, a network
+  // error, anything. Responding to a no-cors request with a cors response
+  // is permitted. Range headers are forwarded for media seeking.
+  if (req.mode === 'no-cors') {
+    const alt = preferredGateway + '/' + url.slice(k + 6);
+    event.respondWith((async function () {
+      try {
+        const res = await fetch(alt, {
+          mode: 'cors',
+          credentials: 'omit',
+          redirect: 'follow',
+          headers: req.headers
+        });
+        if (res.ok) {
+          try { console.info('[gaf sw] proactive substitution (media):', url, '->', alt); } catch (e) {}
+          return res;
+        }
+      } catch (e) {}
+      // Preferred gateway failed or lacks the content - serve the artwork's
+      // original request exactly as authored.
+      return fetch(req);
+    })());
+    return;
+  }
+
   event.respondWith(handleIpfs(req, url, k));
 });
 

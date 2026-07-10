@@ -47,22 +47,32 @@ Push to GitHub and enable Pages. No configuration required.
 - Plain text output with project details, script code, and blockchain provenance  
 - Works across different contract versions with automatic detection
 
-## IPFS Gateway Shim
+## IPFS Gateway Resilience
 
-Some projects with external assets hardcode a specific IPFS gateway in the artist script. When that gateway is unreachable or refuses requests, the artwork fails to load its images even though the content remains available on the IPFS network.
+Some projects with external assets hardcode a specific IPFS gateway in the artist script. When that gateway is unreachable or refuses requests, the artwork fails to load its assets even though the content remains available on the IPFS network.
 
-Flex contracts publish a preferred gateway on-chain, and the generator includes it in every token's data as `tokenData.preferredIPFSGateway`. The generator provides no mechanism to apply it. This renderer completes that wrapper. A small script injected around the artwork serves any `/ipfs/[CID]` asset request through the chain-nominated preferred gateway instead of the hardcoded host.
+Flex contracts publish a preferred gateway on-chain, and the generator includes it in every token's data as `tokenData.preferredIPFSGateway`. The generator provides no mechanism to apply it. This renderer completes that wrapper with two layers.
 
-Because IPFS is content-addressed, the CID resolves to identical bytes on any gateway. The substitution changes delivery only, never content.
+Because IPFS is content-addressed, the CID resolves to identical bytes on any gateway. Substitution changes delivery only, never content.
 
-Scope and guarantees:
-- Artist script bytes are never modified. The shim intercepts asset requests at runtime.
+### Layer 1: network fallback worker (primary)
+
+A service worker (`sw.js`) intercepts every request the artwork frame makes. When a request for an `/ipfs/` path fails against the artist's hardcoded gateway, by connection failure or HTTP error, the worker retries the same content-addressed path against the preferred gateway. This covers all load mechanisms, including p5.js image loads, dynamic `import()`, and library-internal fetches such as ONNX Runtime loading WASM and model files.
+
+The worker tries the artist's URL first, exactly as authored. Self-authenticating URLs, such as those carrying an embedded gateway token, work unmodified. The preferred gateway is used only on observable failure.
+
+### Layer 2: loadImage shim (degraded mode only)
+
+When the service worker is unavailable (unsupported or blocked by the browser), a small script injected around the artwork serves p5.js loadImage requests for `/ipfs/` paths through the preferred gateway proactively. This provides partial coverage without the worker. Because proactive substitution can break projects whose hardcoded gateway works when the preferred gateway lacks the content, the shim is never active while the worker is.
+
+Scope and guarantees for both layers:
+- Artist script bytes are never modified. Interception happens at request time.
 - Only fires when the token's on-chain data includes a preferred gateway. All other tokens render untouched.
-- Only `/ipfs/` paths are rewritten. `/ipns/` and non-IPFS URLs pass through.
-- Covers p5.js loadImage. Projects using other load mechanisms are not intercepted.
-- Every substitution is logged to the browser console for preservation telemetry.
+- Only `/ipfs/` paths. `/ipns/` and non-IPFS URLs pass through.
+- The worker tries the artist's gateway first for inspectable requests (scripts, module imports, library fetches) and substitutes only on failure. Media requests (video, audio, images loaded without CORS) produce opaque responses whose status the worker cannot read, so these are served from the preferred gateway proactively, matching the shim's policy, with fall-through to the original URL if the preferred gateway fails.
+- Substitutions are logged for preservation telemetry. Shim logs appear in the page console, worker logs in the service worker console.
 
-To render the exact contract output with no shim, append `?shim=off` before the hash:
+To render the exact contract output with no shim and the worker disarmed, append `?shim=off` before the hash:
 ```
 https://render.genartfoundation.org/?shim=off#/[contract-address]/[token-id]
 ```
