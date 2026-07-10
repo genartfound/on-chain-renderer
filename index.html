@@ -157,6 +157,43 @@
             // Default ON. ?shim=off renders byte-exact on-chain output.
             return new URLSearchParams(location.search).get('shim') !== 'off';
         }
+
+        // Extract the preferred gateway from the returned HTML by string
+        // search (never parsing). Returns null when the token's contract is
+        // not Flex-enabled and the field is absent.
+        function extractPreferredGateway(html) {
+            const key = '"preferredIPFSGateway":"';
+            const i = html.indexOf(key);
+            if (i === -1) return null;
+            const j = html.indexOf('"', i + key.length);
+            if (j === -1) return null;
+            const g = html.slice(i + key.length, j);
+            return g || null;
+        }
+
+        // Register the service worker (sw.js) and relay the current token's
+        // preferred gateway to it. The worker provides network-level fallback
+        // for load mechanisms no in-frame shim can reach: dynamic import()
+        // and library-internal fetches (e.g. ONNX Runtime WASM and models).
+        // Passing gateway=null disarms the worker for this session.
+        async function setupServiceWorker(gateway) {
+            if (!('serviceWorker' in navigator)) return false;
+            try {
+                await navigator.serviceWorker.register('sw.js');
+                await navigator.serviceWorker.ready;
+                // clients.claim() in the worker takes control of first-visit
+                // pages; give it a moment to land.
+                for (let i = 0; i < 20 && !navigator.serviceWorker.controller; i++) {
+                    await new Promise(r => setTimeout(r, 50));
+                }
+                const c = navigator.serviceWorker.controller;
+                if (!c) return false;
+                c.postMessage({ type: 'gaf:preferred-gateway', gateway: gateway });
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
         
         async function load() {
             try {
@@ -191,6 +228,15 @@
                 const html = enabled ? injectShim(result) : result;
                 if (enabled) {
                     try { console.info('[gaf] gateway shim active | html delta:', html.length - result.length, 'bytes'); } catch (e) {}
+                }
+
+                // Arm (or disarm) the network-level fallback worker with this
+                // token's chain-nominated gateway BEFORE the frame loads, so
+                // the worker controls the frame's requests from the start.
+                const preferred = enabled ? extractPreferredGateway(result) : null;
+                const swActive = await setupServiceWorker(preferred);
+                if (enabled && preferred) {
+                    try { console.info('[gaf] network fallback worker:', swActive ? 'active' : 'unavailable', '| preferred gateway:', preferred); } catch (e) {}
                 }
 
                 frame.srcdoc = html;
