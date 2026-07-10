@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>On-Chain Renderer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background: #000;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        
+        .center {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            text-align: center;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error { color: #ff6b6b; max-width: 80%; padding: 2rem; }
+        
+        iframe {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="status" class="center">
+        <div class="spinner"></div>
+    </div>
+    
+    <iframe id="frame"></iframe>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
+    <script>
+        const CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
+        // getTokenHtml returns the assembled document as a plain string.
+        // The previous getTokenHtmlBase64EncodedDataUri + atob() path
+        // corrupted any non-ASCII bytes (atob decodes to Latin-1, not
+        // UTF-8). ethers' ABI string decoding handles UTF-8 correctly,
+        // and this matches Art Blocks' reference viewer call-for-call.
+        const ABI = [{
+            "inputs": [
+                {"internalType": "address", "name": "coreContract", "type": "address"},
+                {"internalType": "uint256", "name": "tokenId", "type": "uint256"}
+            ],
+            "name": "getTokenHtml",
+            "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+            "stateMutability": "view",
+            "type": "function"
+        }];
+        
+        function showError(msg) {
+            const status = document.getElementById('status');
+            const formattedMsg = msg.replace(/\n/g, '<br>');
+            status.innerHTML = `<div class="error">${formattedMsg}</div>`;
+        }
+
+        // ---------------------------------------------------------------
+        // IPFS gateway shim (proactive rewrite)
+        //
+        // The on-chain generator's wrapper emits tokenData.preferredIPFSGateway
+        // but includes no logic to apply it. Correctly-built Flex projects
+        // (e.g. Aura, project 23) read it themselves; others hardcode a
+        // gateway (ipfs.io, pinata.brightmoments.io) that can fail or refuse
+        // requests. This shim completes the wrapper: any p5 loadImage call
+        // for an /ipfs/<CID>/ path is served via the chain-nominated
+        // preferred gateway instead of the hardcoded host.
+        //
+        // Why proactive (not retry-on-failure): IPFS is content-addressed,
+        // so the CID resolves to bit-identical bytes on any gateway - the
+        // substitution is invisible in output. The common p5 idiom
+        // img = loadImage(url) passes no callbacks, which makes failure-
+        // driven retry depend on per-version p5 internals; URL rewrite
+        // touches only the stable outer contract.
+        //
+        // Scope and guarantees:
+        //  - Only fires when tokenData.preferredIPFSGateway exists (Flex).
+        //    Non-Flex tokens: shim is inert, artwork untouched.
+        //  - Only /ipfs/<CID> paths. /ipns/ and non-IPFS URLs pass through.
+        //  - URLs already on the preferred gateway pass through silently.
+        //  - Every substitution is logged for preservation telemetry.
+        //  - Artist script bytes are never modified; the wrapper intercepts
+        //    the call at runtime.
+        //  - Covers p5 loadImage. Vanilla Image/fetch loaders (e.g. Aura,
+        //    which already uses the preferred gateway) are not intercepted.
+        //
+        // Disable with ?shim=off for byte-exact on-chain behavior.
+        // ---------------------------------------------------------------
+        const CLOSE_SCRIPT = "<" + "/script>";
+
+        const SHIM = "<script>(function(){\n"
+            + "var preferred = null;\n"
+            + "try { if (tokenData && typeof tokenData.preferredIPFSGateway === 'string' && tokenData.preferredIPFSGateway) { preferred = tokenData.preferredIPFSGateway; while (preferred.charAt(preferred.length-1) === '/') preferred = preferred.slice(0, -1); } } catch(e){}\n"
+            + "if (!preferred) return;\n"
+            + "function rewrite(u){\n"
+            + "  if (typeof u !== 'string') return u;\n"
+            + "  if (u.indexOf(preferred + '/') === 0) return u;\n"
+            + "  var k = u.indexOf('/ipfs/');\n"
+            + "  if (k === -1) return u;\n"
+            + "  var out = preferred + '/' + u.slice(k + 6);\n"
+            + "  try { console.info('[gaf] gateway substitution:', u, '->', out); } catch(e){}\n"
+            + "  return out;\n"
+            + "}\n"
+            + "function makeWrapper(_li){\n"
+            + "  var w = function(path){\n"
+            + "    var args = Array.prototype.slice.call(arguments);\n"
+            + "    args[0] = rewrite(path);\n"
+            + "    return _li.apply(this, args);\n"
+            + "  };\n"
+            + "  for (var k in _li){ try{ w[k] = _li[k]; }catch(e){} }\n"
+            + "  return w;\n"
+            + "}\n"
+            + "if (typeof window.loadImage === 'function') { window.loadImage = makeWrapper(window.loadImage); return; }\n"
+            + "var _real;\n"
+            + "Object.defineProperty(window, 'loadImage', { configurable:true, get:function(){return _real;}, set:function(fn){ _real = (typeof fn==='function') ? makeWrapper(fn) : fn; } });\n"
+            + "})();" + CLOSE_SCRIPT;
+
+        // Insert the shim into the wrapper HTML immediately after the first
+        // closing script tag (the tokenData-defining script at document top),
+        // so tokenData is in scope and the property trap is armed before the
+        // dependency scripts define loadImage. Targeted string insertion,
+        // never DOMParser, so nested-script payloads (Quine) are untouched.
+        // If the anchor is missing, the HTML passes through unchanged.
+        function injectShim(html) {
+            const anchor = '<' + '/script>';
+            const idx = html.indexOf(anchor);
+            if (idx === -1) return html;
+            const at = idx + anchor.length;
+            return html.slice(0, at) + SHIM + html.slice(at);
+        }
+
+        function shimEnabled() {
+            // Default ON. ?shim=off renders byte-exact on-chain output.
+            return new URLSearchParams(location.search).get('shim') !== 'off';
+        }
+        
+        async function load() {
+            try {
+                const parts = location.hash.slice(1).split('/').filter(p => p);
+                if (parts.length < 2) throw new Error('Invalid URL format');
+                
+                const [contract, tokenId] = parts.slice(-2);
+                if (!contract.startsWith('0x') || contract.length !== 42) throw new Error('Invalid contract address');
+                if (isNaN(tokenId)) throw new Error('Invalid token ID');
+                
+                const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/e29898f2b78f4810ae2d0ce4c2a4a449');
+                const instance = new ethers.Contract(CONTRACT, ABI, provider);
+                
+                let result;
+                try {
+                    result = await instance.getTokenHtml(contract, tokenId);
+                } catch (contractError) {
+                    throw new Error('Token not supported');
+                }
+
+                if (!result || typeof result !== 'string' || result.length < 20) {
+                    throw new Error('Token not supported');
+                }
+
+                const frame = document.getElementById('frame');
+
+                // Complete the wrapper: inject the gateway shim (default on;
+                // ?shim=off renders the exact on-chain bytes). Injection is
+                // targeted string insertion, never DOMParser, so nested-script
+                // payloads (Quine) are safe.
+                const enabled = shimEnabled();
+                const html = enabled ? injectShim(result) : result;
+                if (enabled) {
+                    try { console.info('[gaf] gateway shim active | html delta:', html.length - result.length, 'bytes'); } catch (e) {}
+                }
+
+                frame.srcdoc = html;
+
+                document.getElementById('status').style.display = 'none';
+                frame.style.display = 'block';
+                
+            } catch (error) {
+                let msg;
+                
+                if (error.message.includes('Invalid URL format') || error.message.includes('Invalid contract address') || error.message.includes('Invalid token ID')) {
+                    msg = 'Failed to load artwork\n\nInvalid URL format, please use proper format: /#/[contract-address]/[token-id]';
+                } else if (error.message.includes('Token not supported')) {
+                    msg = 'Failed to load artwork\n\nToken not returned, please check contract address and token ID';
+                } else {
+                    msg = 'Failed to load artwork\n\nNetwork or contract call error, please try again';
+                }
+                
+                showError(msg);
+            }
+        }
+        
+        window.addEventListener('DOMContentLoaded', load);
+    </script>
+</body>
+</html>
