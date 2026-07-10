@@ -57,12 +57,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
     <script>
         const CONTRACT = '0x953D288708bB771F969FCfD9BA0819eF506Ac718';
+        // getTokenHtml returns the assembled document as a plain string.
+        // The previous getTokenHtmlBase64EncodedDataUri + atob() path
+        // corrupted any non-ASCII bytes (atob decodes to Latin-1, not
+        // UTF-8). ethers' ABI string decoding handles UTF-8 correctly,
+        // and this matches Art Blocks' reference viewer call-for-call.
         const ABI = [{
             "inputs": [
-                {"internalType": "address", "name": "_coreContract", "type": "address"},
-                {"internalType": "uint256", "name": "_tokenId", "type": "uint256"}
+                {"internalType": "address", "name": "coreContract", "type": "address"},
+                {"internalType": "uint256", "name": "tokenId", "type": "uint256"}
             ],
-            "name": "getTokenHtmlBase64EncodedDataUri",
+            "name": "getTokenHtml",
             "outputs": [{"internalType": "string", "name": "", "type": "string"}],
             "stateMutability": "view",
             "type": "function"
@@ -72,6 +77,85 @@
             const status = document.getElementById('status');
             const formattedMsg = msg.replace(/\n/g, '<br>');
             status.innerHTML = `<div class="error">${formattedMsg}</div>`;
+        }
+
+        // ---------------------------------------------------------------
+        // IPFS gateway shim (proactive rewrite)
+        //
+        // The on-chain generator's wrapper emits tokenData.preferredIPFSGateway
+        // but includes no logic to apply it. Correctly-built Flex projects
+        // (e.g. Aura, project 23) read it themselves; others hardcode a
+        // gateway (ipfs.io, pinata.brightmoments.io) that can fail or refuse
+        // requests. This shim completes the wrapper: any p5 loadImage call
+        // for an /ipfs/<CID>/ path is served via the chain-nominated
+        // preferred gateway instead of the hardcoded host.
+        //
+        // Why proactive (not retry-on-failure): IPFS is content-addressed,
+        // so the CID resolves to bit-identical bytes on any gateway - the
+        // substitution is invisible in output. The common p5 idiom
+        // img = loadImage(url) passes no callbacks, which makes failure-
+        // driven retry depend on per-version p5 internals; URL rewrite
+        // touches only the stable outer contract.
+        //
+        // Scope and guarantees:
+        //  - Only fires when tokenData.preferredIPFSGateway exists (Flex).
+        //    Non-Flex tokens: shim is inert, artwork untouched.
+        //  - Only /ipfs/<CID> paths. /ipns/ and non-IPFS URLs pass through.
+        //  - URLs already on the preferred gateway pass through silently.
+        //  - Every substitution is logged for preservation telemetry.
+        //  - Artist script bytes are never modified; the wrapper intercepts
+        //    the call at runtime.
+        //  - Covers p5 loadImage. Vanilla Image/fetch loaders (e.g. Aura,
+        //    which already uses the preferred gateway) are not intercepted.
+        //
+        // Disable with ?shim=off for byte-exact on-chain behavior.
+        // ---------------------------------------------------------------
+        const CLOSE_SCRIPT = "<" + "/script>";
+
+        const SHIM = "<script>(function(){\n"
+            + "var preferred = null;\n"
+            + "try { if (tokenData && typeof tokenData.preferredIPFSGateway === 'string' && tokenData.preferredIPFSGateway) { preferred = tokenData.preferredIPFSGateway; while (preferred.charAt(preferred.length-1) === '/') preferred = preferred.slice(0, -1); } } catch(e){}\n"
+            + "if (!preferred) return;\n"
+            + "function rewrite(u){\n"
+            + "  if (typeof u !== 'string') return u;\n"
+            + "  if (u.indexOf(preferred + '/') === 0) return u;\n"
+            + "  var k = u.indexOf('/ipfs/');\n"
+            + "  if (k === -1) return u;\n"
+            + "  var out = preferred + '/' + u.slice(k + 6);\n"
+            + "  try { console.info('[gaf] gateway substitution:', u, '->', out); } catch(e){}\n"
+            + "  return out;\n"
+            + "}\n"
+            + "function makeWrapper(_li){\n"
+            + "  var w = function(path){\n"
+            + "    var args = Array.prototype.slice.call(arguments);\n"
+            + "    args[0] = rewrite(path);\n"
+            + "    return _li.apply(this, args);\n"
+            + "  };\n"
+            + "  for (var k in _li){ try{ w[k] = _li[k]; }catch(e){} }\n"
+            + "  return w;\n"
+            + "}\n"
+            + "if (typeof window.loadImage === 'function') { window.loadImage = makeWrapper(window.loadImage); return; }\n"
+            + "var _real;\n"
+            + "Object.defineProperty(window, 'loadImage', { configurable:true, get:function(){return _real;}, set:function(fn){ _real = (typeof fn==='function') ? makeWrapper(fn) : fn; } });\n"
+            + "})();" + CLOSE_SCRIPT;
+
+        // Insert the shim into the wrapper HTML immediately after the first
+        // closing script tag (the tokenData-defining script at document top),
+        // so tokenData is in scope and the property trap is armed before the
+        // dependency scripts define loadImage. Targeted string insertion,
+        // never DOMParser, so nested-script payloads (Quine) are untouched.
+        // If the anchor is missing, the HTML passes through unchanged.
+        function injectShim(html) {
+            const anchor = '<' + '/script>';
+            const idx = html.indexOf(anchor);
+            if (idx === -1) return html;
+            const at = idx + anchor.length;
+            return html.slice(0, at) + SHIM + html.slice(at);
+        }
+
+        function shimEnabled() {
+            // Default ON. ?shim=off renders byte-exact on-chain output.
+            return new URLSearchParams(location.search).get('shim') !== 'off';
         }
         
         async function load() {
@@ -88,30 +172,29 @@
                 
                 let result;
                 try {
-                    result = await instance.getTokenHtmlBase64EncodedDataUri(contract, tokenId);
+                    result = await instance.getTokenHtml(contract, tokenId);
                 } catch (contractError) {
                     throw new Error('Token not supported');
                 }
-                
-                if (!result || result === '' || result === '0x' || result.length < 20 || !result.startsWith('data:text/html;base64,')) {
+
+                if (!result || typeof result !== 'string' || result.length < 20) {
                     throw new Error('Token not supported');
                 }
-                
+
                 const frame = document.getElementById('frame');
-                const html = atob(result.split(',')[1]);
-                
-                if (html.includes('processing.min.js') || html.includes('Processing(')) {
-                    frame.onload = () => {
-                        const doc = frame.contentDocument;
-                        doc.open();
-                        doc.write(html);
-                        doc.close();
-                    };
-                    frame.src = 'about:blank';
-                } else {
-                    frame.src = result;
+
+                // Complete the wrapper: inject the gateway shim (default on;
+                // ?shim=off renders the exact on-chain bytes). Injection is
+                // targeted string insertion, never DOMParser, so nested-script
+                // payloads (Quine) are safe.
+                const enabled = shimEnabled();
+                const html = enabled ? injectShim(result) : result;
+                if (enabled) {
+                    try { console.info('[gaf] gateway shim active | html delta:', html.length - result.length, 'bytes'); } catch (e) {}
                 }
-                
+
+                frame.srcdoc = html;
+
                 document.getElementById('status').style.display = 'none';
                 frame.style.display = 'block';
                 
